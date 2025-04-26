@@ -6,6 +6,7 @@ import math
 import sys
 import itertools
 from scipy.spatial.distance import cdist
+import loyolaPaperFunctions as loyoladf
 
 # mpiexec -n 4 python clusterGenerator.py
 # DEVELOPERS CAITLIN LAMIREZ 
@@ -126,7 +127,7 @@ def distributedRepartition(startIndex,rank, pair, allGatherRankDict,rankDistribu
     distDict = {}
     #print(f"Rank {rank} dFrame {dFrame.index.tolist()}")
     for i in rankDistribution[rank]:
-        print("DistributedRepartition",geneDf)
+        #print("DistributedRepartition",geneDf)
         newDf = geneDf.loc[i + startIndex]   # inputDataFrame.loc[i]
         
         for key in allGatherRankDict :
@@ -160,6 +161,28 @@ def distributedRepartition(startIndex,rank, pair, allGatherRankDict,rankDistribu
     if pair != -1 :
         k_clusters = combinedCombinationDict[tuple(pair)]
     return k_clusters
+
+def combineAllGather(rankList):
+    completeAllGatherDict = {}
+    
+    # Goes through each list returned from each rank
+    for rankDict in rankList:
+        for key, val in rankDict.items():
+            # If a nested list - ex: {0: [[1,2,3]], flatten it to remove brackets
+            if ifNestedList(val):
+                # Flatten list until extra brackets are removed
+                while ifNestedList(val):
+                    val = [x for sublist in val for x in sublist]
+                
+                
+                completeAllGatherDict.setdefault(key, []).append(val)
+                
+            # Otherwise, just append the list to the key
+            else:
+                for x in val:
+                    completeAllGatherDict.setdefault(key, []).append(x)
+    
+    return completeAllGatherDict
 
 def distributedErrorFromDistance(rank, k_clusters,preTotalDistance,comm : MPI.COMM_WORLD) :
     if rank == 0 :
@@ -312,16 +335,17 @@ colList = [i for i in range(cols)]
 myList = cartesianProduct(numDim,numProcessors,rank,colList)
 
 
-print(myList)
+#print(myList)
 
-print(geneDf)
+#print(geneDf)
 
 #currDistribution = [ i + startIndex for i in rankDistribution[rank] ]
 #for i in range(cols) :
 ##    distrList = geneDf.iloc[rankDistribution[rank],i].tolist()
 #    print(distrList)
 #exit(0)
-
+clusterProjections = {}
+densityMap = {}
 for pair in myList :
     if pair != -1:
         pairSize = len(pair)
@@ -332,12 +356,12 @@ for pair in myList :
             dfName = geneDf.columns[pair[i]] 
             dfDict[dfName] = dfList
             #print("---------SUBSPACE----------")
-            print("Name: ",dfName)
-            print("Total Column Data",len(dfList))
-            print("Pair ",pair[i])
-            print("Rank Distribution ",rankDistribution[rank])
+            #print("Name: ",dfName)
+            #print("Total Column Data",len(dfList))
+            #print("Pair ",pair[i])
+            #print("Rank Distribution ",rankDistribution[rank])
             #print("---------SUBSPACE----------")
-            print("Start index",startIndex)
+            #print("Start index",startIndex)
             #currentDistribution = [ i + startIndex  for i in rankDistribution[rank] ] 
             #print("RankDistribution",rankDistribution[rank])
             #print("Current distribution",currentDistribution)
@@ -352,3 +376,61 @@ for pair in myList :
         dataframe = pd.DataFrame()
 
     k_clusters = generateClusters(startIndex,k,rankDistribution,dataframe,geneDf,rank, pair,comm)
+
+    #print(pair)
+   
+    
+
+    # Initilizing of subspace
+    for i in range(len(rankDistribution[rank])) : 
+        for index,cluster in enumerate(k_clusters):
+            densityScore = loyoladf.getDensityScore(cluster)
+            densityMap.setdefault(tuple(pair),[]).append(densityScore)
+            rowList = [ i for i in cluster.index]
+            if i in rowList :
+                clusterProjections.setdefault(i,[]).append([pair,index])
+        
+                   
+
+#    [1 : [270,12], 20 : [2]]
+#    
+#print(rank, clusterProjections)
+clusterProjectTwo = {}
+for key,valueList in clusterProjections.items() :
+    # [ 270 : [[(0,2),1], (0,1), (3,1)] , 20 ]
+    for projectionId in range(cols) :
+        # check colIndex within valueList
+        for subspace in valueList :
+            pairId = subspace[0]
+            clusterId = subspace[1]
+            
+            if projectionId in pairId :
+                clusterProjectTwo[key] = { projectionId : [clusterId,pairId,densityMap[tuple(pairId)][clusterId]]}
+
+
+
+try:
+    clusterProjectTwo = comm.allgather(clusterProjectTwo)
+except Exception as e:
+    print(f"Error in comm.allgather at rank {rank}: {e}")
+
+combineDict = combineAllGather(clusterProjectTwo)
+
+if rank == 0 :
+    print(clusterProjectTwo)
+
+# ALL GATHER
+
+
+
+#       Projection  : [ cluster index for each subspace] 
+# 270 :  1 : [ 1, (0,1), 45 ]
+
+# All Gather 
+#270 : 1 : [ [ 1, (0,1), 45 ],  [ 2, (3,1), 15 ] ]
+#270 : [ 1 : [1]] # Because the majority 
+
+
+
+
+  

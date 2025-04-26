@@ -14,7 +14,7 @@ def getRowChunks(df, startIndex, endIndex):
 
 # getDensityScore: used when there is a tie between cluster results for each projection
 # clusterList: list containing (x,y,z...) (depends on dimension 5,10,15,etc.) coordinates of each data point
-def getDensityScore(cluster, headerNames):
+def getDensityScore(cluster):
     '''
     dfDict = {}
     dfList = cluster
@@ -25,15 +25,17 @@ def getDensityScore(cluster, headerNames):
     '''
     # cluster[i] returns a list of your row
     # headerNames[i] returns the name of the attribute for the column
+
+    #print("Loyola Paper",cluster)
     
     cartesianProd = changeToList(list(itertools.product([i for i in range(len(cluster))],[i for i in range(len(cluster))])))
     cartesianProd = list(createReducedList(cartesianProd))
-    print("cartesianProd = ", cartesianProd)
+    #print("cartesianProd = ", cartesianProd)
     dfDict = {}
     sumDistance = 0
     for tup in cartesianProd:
-        p1 = cluster[tup[0]] # return list of n-dimensional points
-        p2 = cluster[tup[1]]
+        p1 = cluster.iloc[tup[0],:] # return list of n-dimensional points
+        p2 = cluster.iloc[tup[1],:]
         
         for i in range(len(p1)):
             val1 = p1[i]
@@ -92,4 +94,4 @@ def createReducedList(cartesianProduct) :
 headerNames = ["a","b","c"]
 cluster1 = [[1,2,3],[3,2,1],[1,2,2],[2,3,1],[1,1,3]]
 
-print(getDensityScore(cluster1, headerNames))
+#print(getDensityScore(cluster1, headerNames))

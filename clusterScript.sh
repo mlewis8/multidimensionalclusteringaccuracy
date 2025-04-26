@@ -4,10 +4,10 @@ scriptName="clusterGenerator.py"
 
 # cols rows dim k
 cols=5
-rows=400
+rows=200
 dim=2 
 k=3
-expRow=200
+expRow=100
 
 
 # Number of ranks per program
@@ -27,9 +27,9 @@ fi
 
 
 # Will run each program 10 times
-for ((rowIter=0; rowIter<${rows}; rowIter += 200)); do
+for ((rowIter=0; rowIter<${rows}; rowIter += expRow)); do
         echo "Starting a ${i} processor job !"
-        endIndex=$((rowIter +200))
+        endIndex=$((rowIter +expRow))
         mpirun -n ${rankSizes[$i]} python $scriptName $homeDir ${cols} ${rowIter} ${endIndex} ${dim} ${rows} ${expRow} &
         echo "***********************************"
         wait
