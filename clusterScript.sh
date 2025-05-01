@@ -20,7 +20,7 @@ numPrograms=${#rankSizes[@]}
 
 inputFile="$homeDir/input/PARTITION_rows_${rows}_cols_${cols}_procs_${rankSizes}.csv"
 if [ ! -f ${inputFile}  ]; then
-        echo "Creating th input file"
+        echo "Creating the input file"
         execFile="${homeDir}/createInput.py"
         python ${execFile} ${inputDir} ${cols} ${rows} ${expRow} ${rankSizes}
 fi

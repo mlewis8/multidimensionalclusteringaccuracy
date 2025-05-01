@@ -154,13 +154,33 @@ def distributedRepartition(startIndex,rank, pair, allGatherRankDict,rankDistribu
     for key in allGatheredDistDict :
         combination = tuple(key[0:len(key)-1])
         currentList = allGatheredDistDict[key]
-        newDf = geneDf.iloc[currentList]
+        print(key)
+        newDf = geneDf.iloc[currentList,list(key[0:len(key)-1])]
         #time.sleep(.001)
         combinedCombinationDict.setdefault(combination,[]).append(newDf)
     k_clusters = []
     if pair != -1 :
         k_clusters = combinedCombinationDict[tuple(pair)]
     return k_clusters
+
+def repartition(completeKclusters,originalDataFrame) :
+    indexList = [ i for i in originalDataFrame.index]
+    newK_clusters = []
+    clusterAssignments = {}
+    for i in indexList :
+        # Create a single point dataFrame
+        singleDataFrame = originalDataFrame.iloc[i]
+        min = [math.inf, -1]
+        for index,clusterDataFrame in enumerate(completeKclusters) :
+            distance = euclidean(singleDataFrame, clusterDataFrame,1)
+            if distance < min[0] :
+                min[0] = distance
+                min[1] = index
+        clusterAssignments.setdefault(index,[]).append(i)
+    for key,clusterList in clusterAssignments.items() :
+        newCluster = originalDataFrame.iloc(clusterList)
+        newK_clusters.append(newCluster)
+    return newK_clusters
 
 def combineAllGather(rankList):
     completeAllGatherDict = {}
@@ -222,6 +242,8 @@ def generateClusters(startIndex,k,rankDistribution,dataFrame,geneDf,rank=0,pair=
     # k_clusters - the k partitions of the dataFrame
     rankDict = {}
     k_clusters = generateKGroups(k,dataFrame)
+    #for cluster in k_clusters :
+    #    print(rank,cluster)
     if pair != -1 :
         rankDict[tuple(pair)] = k_clusters
    
@@ -238,7 +260,7 @@ def generateClusters(startIndex,k,rankDistribution,dataFrame,geneDf,rank=0,pair=
     allGatheredRankDict = comm.allgather(rankDict)
     allGatheredRankDict = combineAllGather(allGatheredRankDict)
 
-    #print(f"Rank {rank} keys: {rankDict.keys()}")    
+    print(f"Rank {rank} keys: {rankDict.keys()}")    
     #if rank == 0 :
     #print(f"ALL GATHER DICT : {rank} -  {list(allGatheredRankDict.keys())} - {list(rankDict.keys()) }  ")                            
     
@@ -250,7 +272,10 @@ def generateClusters(startIndex,k,rankDistribution,dataFrame,geneDf,rank=0,pair=
     while True :
         # Every processor wether they have a dataFrame or not, needs to be a part of this process
         k_clusters = distributedRepartition(startIndex,rank,pair,allGatheredRankDict,rankDistribution,geneDf,comm)
-
+        if count == 0 :
+            for cluster in k_clusters :
+                print(cluster)
+        count += 1
         [totalDistance,continueProcessingTotal] = distributedErrorFromDistance(rank, k_clusters,preTotalDistance,comm)
         
         if continueProcessingTotal == False:
@@ -299,13 +324,6 @@ def getProjectionRow(rankingList) :
             returnList.append(winningIndex)
     return returnList
 
-
-
-
-
-
-
-
 # numRowsIndex and numColumnsIndex are passed to this program
 
 comm = MPI.COMM_WORLD
@@ -328,7 +346,7 @@ expRow = int(sys.argv[7])
 #dfHeader = pd.read_csv('your_data.csv', nrows=0)
 #headerNames = list(dfHeader.columns)
 rowData = []
-print(homeDirectory,cols,startIndex,endIndex,numDim,numRows)
+#print(homeDirectory,cols,startIndex,endIndex,numDim,numRows)
 
 
 if rank == 0:
@@ -349,12 +367,12 @@ if rank == 0:
     geneDf = df.drop(df.columns[0],axis=1)
     lineageNames = list(geneDf)
 
-    maxList = [ series.max() for name, series in geneDf.items()]
-    minList = [ series.min() for name, series in geneDf.items()]
-    totalMin = np.min(minList)
-    totalMax = np.max(maxList)
-    for name,series in geneDf.items() :
-        geneDf[name] = geneDf[name].apply(lambda x: (x - totalMin) / (totalMax - totalMin))
+    #maxList = [ series.max() for name, series in geneDf.items()]
+    #minList = [ series.min() for name, series in geneDf.items()]
+    #totalMin = np.min(minList)
+    #totalMax = np.max(maxList)
+    #for name,series in geneDf.items() :
+    #    geneDf[name] = geneDf[name].apply(lambda x: (x - totalMin) / (totalMax - totalMin))
 else:
     geneDf = None 
     geneSymbols = None 
@@ -421,20 +439,26 @@ for pair in myList :
         distributionDf = pd.DataFrame()
         dataframe = pd.DataFrame()
 
+    #if len(dataframe) > 0 :
+    #    print(dataframe)
     k_clusters = generateClusters(startIndex,k,rankDistribution,dataframe,geneDf,rank, pair,comm)
 
    
    
     
-
+    #print(k_clusters)
     # Initilizing of subspace
     # densityMap (pair) : [ density score1, densityScore2, densityScore3]
     # UPDATE (pair) : [ [[clusterlist],densityScore, id = -1], [clusterlist],densityScore1, id = -1]]
     # clusterProjection (rowId) : [pairId1, pairId2,...]
     
     for index,cluster in enumerate(k_clusters):
+        #print(cluster)
         densityScore = loyoladf.getDensityScore(cluster)
         densityMap.setdefault(tuple(pair),[]).append([[i for i in cluster.index],densityScore])
+
+# Calculate the full multidimensional cluster
+
 
 for key in densityMap :
     listData = densityMap[key]
@@ -481,7 +505,7 @@ if rank == 0 :
                     rankingMap.setdefault(rowId,[]).append([pair,densityList[index],index])
 
     for rowId, item in rankingMap.items() :
-        print([i[0],i[2]] for i in item)
+        #print([i[0],i[2]] for i in item)
         projectionMap.setdefault(rowId,[]).append(getProjectionRow(item))
         
 

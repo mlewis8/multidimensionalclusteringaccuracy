@@ -27,7 +27,7 @@ print("Create INPUT",homeDirectory,numTotalColumns,numRows,numProcessors)
 
 myList = list(np.arange(expRow))
 random.shuffle(myList)
-print(myList)
+#print(myList)
 
 rowDistribution = [ i.tolist() for i in np.array_split(myList,numProcessors)  ] 
 evenDistribution(rowDistribution)
