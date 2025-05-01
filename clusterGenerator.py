@@ -260,6 +260,52 @@ def generateClusters(startIndex,k,rankDistribution,dataFrame,geneDf,rank=0,pair=
         comm.barrier()
     return k_clusters
 
+# [(0, 2), 25.658096116831313, 1]
+def getProjectionRow(rankingList) :
+    tempMap = {}
+    finalMap = {}
+    for item in rankingList :
+        for projectionId in range(cols) :
+            if projectionId in item[0] :
+                tempMap.setdefault(projectionId,[]).append(item)
+
+    winnerList = [0 for i in range(cols) ]
+    densityAccum = [0 for i in range(cols)]
+    returnList = []
+    for projectionId,items in tempMap.items() :
+        for item in items :
+            densityScore = item[1]
+            index = item[2]
+            winnerList[index] += 1
+            densityAccum[index] += densityScore
+        topValue = [0, []] # Top value and density score
+        for index,item in enumerate(winnerList) :
+            if item > topValue[0] :
+                topValue[1] = [index]
+                topValue[0] = item
+            elif item == topValue[0] :
+                topValue[1].append(index)
+        finalList = topValue[1]
+        if len(finalList) == 1 :
+            returnList.append(finalList[0])
+        else :
+            topDensityVal = 0 
+            winningIndex = -1
+            for index in finalList :
+                densityVal = densityAccum[index]
+                if densityVal > topDensityVal :
+                    winningIndex = index
+                    topDensityVal = densityVal
+            returnList.append(winningIndex)
+    return returnList
+
+
+
+
+
+
+
+
 # numRowsIndex and numColumnsIndex are passed to this program
 
 comm = MPI.COMM_WORLD
@@ -377,47 +423,99 @@ for pair in myList :
 
     k_clusters = generateClusters(startIndex,k,rankDistribution,dataframe,geneDf,rank, pair,comm)
 
-    #print(pair)
+   
    
     
 
     # Initilizing of subspace
-    for i in range(len(rankDistribution[rank])) : 
-        for index,cluster in enumerate(k_clusters):
-            densityScore = loyoladf.getDensityScore(cluster)
-            densityMap.setdefault(tuple(pair),[]).append(densityScore)
-            rowList = [ i for i in cluster.index]
-            if i in rowList :
-                clusterProjections.setdefault(i,[]).append([pair,index])
-        
-                   
+    # densityMap (pair) : [ density score1, densityScore2, densityScore3]
+    # UPDATE (pair) : [ [[clusterlist],densityScore, id = -1], [clusterlist],densityScore1, id = -1]]
+    # clusterProjection (rowId) : [pairId1, pairId2,...]
+    
+    for index,cluster in enumerate(k_clusters):
+        densityScore = loyoladf.getDensityScore(cluster)
+        densityMap.setdefault(tuple(pair),[]).append([[i for i in cluster.index],densityScore])
 
-#    [1 : [270,12], 20 : [2]]
-#    
-#print(rank, clusterProjections)
-clusterProjectTwo = {}
-for key,valueList in clusterProjections.items() :
-    # [ 270 : [[(0,2),1], (0,1), (3,1)] , 20 ]
-    for projectionId in range(cols) :
-        # check colIndex within valueList
-        for subspace in valueList :
-            pairId = subspace[0]
-            clusterId = subspace[1]
-            
-            if projectionId in pairId :
-                clusterProjectTwo[key] = { projectionId : [clusterId,pairId,densityMap[tuple(pairId)][clusterId]]}
+for key in densityMap :
+    listData = densityMap[key]
+    sortedList = sorted(listData, key = lambda x: x[1])
+    densityMap[key] = sortedList
+    #print(key,densityMap[key])
 
-
-
+sortedClusterMap = {} 
+sortedDensityMap = {}
+for key in densityMap :
+    listData = densityMap[key]
+    for val in listData :
+        sortedClusterMap.setdefault(key,[]).append(val[0])
+        sortedDensityMap.setdefault(key,[]).append(val[1])
+                
+#print(sortedClusterMap)
+#print(sortedDensityMap)
 try:
-    clusterProjectTwo = comm.allgather(clusterProjectTwo)
+    sortedDensityMap = comm.allgather(sortedDensityMap)
 except Exception as e:
     print(f"Error in comm.allgather at rank {rank}: {e}")
 
-combineDict = combineAllGather(clusterProjectTwo)
+combineDensity = combineAllGather(sortedDensityMap)
+#print(combineDensity)
+
+try:
+    sortedClusterMap = comm.allgather(sortedClusterMap)
+except Exception as e:
+    print(f"Error in comm.allgather at rank {rank}: {e}")
+
+combineCluster = combineAllGather(sortedClusterMap)
+#print(combineCluster)
+#print(len(dataframe))
+
+rankingMap = {}
+projectionMap = {}
 
 if rank == 0 :
-    print(clusterProjectTwo)
+    for rowId in range(len(dataframe)) :
+        for pair, clusterListings in combineCluster.items() :
+            densityList = combineDensity[pair]
+            for index,clusterList in enumerate(clusterListings) :
+                if rowId in clusterList :
+                    rankingMap.setdefault(rowId,[]).append([pair,densityList[index],index])
+
+    for rowId, item in rankingMap.items() :
+        print([i[0],i[2]] for i in item)
+        projectionMap.setdefault(rowId,[]).append(getProjectionRow(item))
+        
+
+print(projectionMap)
+
+
+
+#    print(combineDict)
+#    [1 : [270,12], 20 : [2]]
+#    
+#print(rank, clusterProjections)
+#clusterProjectTwo = {}
+#for key,valueList in clusterProjections.items() :
+#    # [ 270 : [[(0,2),1], (0,1), (3,1)] , 20 ]
+#    for projectionId in range(cols) :
+#        # check colIndex within valueList
+#        for subspace in valueList :
+#            pairId = subspace[0]
+#            clusterId = subspace[1]
+            
+#            if projectionId in pairId :
+#                clusterProjectTwo[key] = { projectionId : [clusterId,pairId,densityMap[tuple(pairId)][clusterId]]}
+
+
+
+#try:
+#    clusterProjectTwo = comm.allgather(clusterProjectTwo)
+#except Exception as e:
+#    print(f"Error in comm.allgather at rank {rank}: {e}")
+
+#combineDict = combineAllGather(clusterProjectTwo)
+
+#if rank == 0 :
+#    print(clusterProjectTwo)
 
 # ALL GATHER
 
@@ -429,8 +527,3 @@ if rank == 0 :
 # All Gather 
 #270 : 1 : [ [ 1, (0,1), 45 ],  [ 2, (3,1), 15 ] ]
 #270 : [ 1 : [1]] # Because the majority 
-
-
-
-
-  

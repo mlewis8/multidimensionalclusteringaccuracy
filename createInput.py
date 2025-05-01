@@ -38,7 +38,7 @@ for i in range(numProcessors) :
 
 inputDf = pd.DataFrame()
 for i in range(numTotalColumns) :
-    columnList = np.random.uniform(low=0.5, high=20.0, size=(numRows,))
+    columnList = np.random.uniform(low=0, high=1, size=(numRows,))
     random.shuffle(columnList)
     inputDf.insert(i,"Col#%d"%i,columnList,True)
     
