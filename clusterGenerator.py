@@ -154,7 +154,6 @@ def distributedRepartition(startIndex,rank, pair, allGatherRankDict,rankDistribu
     for key in allGatheredDistDict :
         combination = tuple(key[0:len(key)-1])
         currentList = allGatheredDistDict[key]
-        print(key)
         newDf = geneDf.iloc[currentList,list(key[0:len(key)-1])]
         #time.sleep(.001)
         combinedCombinationDict.setdefault(combination,[]).append(newDf)
@@ -176,9 +175,9 @@ def repartition(completeKclusters,originalDataFrame) :
             if distance < min[0] :
                 min[0] = distance
                 min[1] = index
-        clusterAssignments.setdefault(index,[]).append(i)
+        clusterAssignments.setdefault(min[1],[]).append(i)
     for key,clusterList in clusterAssignments.items() :
-        newCluster = originalDataFrame.iloc(clusterList)
+        newCluster = originalDataFrame.iloc[clusterList]
         newK_clusters.append(newCluster)
     return newK_clusters
 
@@ -235,6 +234,32 @@ def distributedErrorFromDistance(rank, k_clusters,preTotalDistance,comm : MPI.CO
     
     return [totalDistance,1 in rankList]
 
+def standaloneErrorFromDistance(k_clusters,preTotalDistance) :
+    totalDistance = 0.0
+    returnVal = False
+    if k_clusters != [] :
+        for dataFrame in k_clusters:
+            if len(dataFrame) > 0 :
+                centroidDataframe = np.mean(dataFrame, axis=0)
+                centroidDataframe = pd.DataFrame(centroidDataframe).transpose()
+                result = cdist(dataFrame,centroidDataframe,metric='mahalanobis')
+                totalDistance = totalDistance + np.sum(result)
+        if abs(preTotalDistance - totalDistance) > .0001 :
+            returnVal = True
+    return [totalDistance,returnVal]
+
+def standaloneGenerateClusters(k,completeDataFrame) :
+    preTotalDistance = 0
+    k_clusters = generateKGroups(k,completeDataFrame)
+
+    while True :
+        k_clusters = repartition(k_clusters,completeDataFrame)
+        [preTotalDistance,returnVal] = standaloneErrorFromDistance(k_clusters,preTotalDistance)
+        if returnVal == False :
+            break
+    return k_clusters
+
+
 def generateClusters(startIndex,k,rankDistribution,dataFrame,geneDf,rank=0,pair=0,comm : MPI.COMM_WORLD = 0) :
     # rankDistribution - the list of ids for this rank
     # dataFrame - the two column list for the dataFrame
@@ -246,7 +271,6 @@ def generateClusters(startIndex,k,rankDistribution,dataFrame,geneDf,rank=0,pair=
     #    print(rank,cluster)
     if pair != -1 :
         rankDict[tuple(pair)] = k_clusters
-   
 
     #------------- INFORMATION FOR DISTRIBUTED SECTION -----------------
     #    1. ALL TO ALL ON DICTIONARY (pair,k_clusters), (-1,-1) when pair = -1 
@@ -260,7 +284,7 @@ def generateClusters(startIndex,k,rankDistribution,dataFrame,geneDf,rank=0,pair=
     allGatheredRankDict = comm.allgather(rankDict)
     allGatheredRankDict = combineAllGather(allGatheredRankDict)
 
-    print(f"Rank {rank} keys: {rankDict.keys()}")    
+    #print(f"Rank {rank} keys: {rankDict.keys()}")    
     #if rank == 0 :
     #print(f"ALL GATHER DICT : {rank} -  {list(allGatheredRankDict.keys())} - {list(rankDict.keys()) }  ")                            
     
@@ -272,10 +296,7 @@ def generateClusters(startIndex,k,rankDistribution,dataFrame,geneDf,rank=0,pair=
     while True :
         # Every processor wether they have a dataFrame or not, needs to be a part of this process
         k_clusters = distributedRepartition(startIndex,rank,pair,allGatheredRankDict,rankDistribution,geneDf,comm)
-        if count == 0 :
-            for cluster in k_clusters :
-                print(cluster)
-        count += 1
+
         [totalDistance,continueProcessingTotal] = distributedErrorFromDistance(rank, k_clusters,preTotalDistance,comm)
         
         if continueProcessingTotal == False:
@@ -323,6 +344,22 @@ def getProjectionRow(rankingList) :
                     topDensityVal = densityVal
             returnList.append(winningIndex)
     return returnList
+
+def getPercentage(rowList, maxCount) :
+    count = 0
+    rowCount = 0
+    myList = []
+    limit = 0
+    for val in rowList :
+        rowCount = val[1]
+        if rowCount == maxCount :
+            myList.append(val)
+            limit += 1
+            if val[0] == val[2] :
+                count += 1
+
+    return [count,limit,count/limit * 100]
+  
 
 # numRowsIndex and numColumnsIndex are passed to this program
 
@@ -419,18 +456,7 @@ for pair in myList :
             dfList = geneDf.iloc[:,pair[i]].tolist()
             dfName = geneDf.columns[pair[i]] 
             dfDict[dfName] = dfList
-            #print("---------SUBSPACE----------")
-            #print("Name: ",dfName)
-            #print("Total Column Data",len(dfList))
-            #print("Pair ",pair[i])
-            #print("Rank Distribution ",rankDistribution[rank])
-            #print("---------SUBSPACE----------")
-            #print("Start index",startIndex)
-            #currentDistribution = [ i + startIndex  for i in rankDistribution[rank] ] 
-            #print("RankDistribution",rankDistribution[rank])
-            #print("Current distribution",currentDistribution)
             distrList = geneDf.iloc[rankDistribution[rank],pair[i]].tolist()
-            #print(distrList)
             distrDict[dfName] = distrList
         dataframe = pd.DataFrame(dfDict)
         distributionDf = pd.DataFrame(distrDict)
@@ -439,32 +465,39 @@ for pair in myList :
         distributionDf = pd.DataFrame()
         dataframe = pd.DataFrame()
 
-    #if len(dataframe) > 0 :
-    #    print(dataframe)
     k_clusters = generateClusters(startIndex,k,rankDistribution,dataframe,geneDf,rank, pair,comm)
 
-   
-   
-    
-    #print(k_clusters)
-    # Initilizing of subspace
-    # densityMap (pair) : [ density score1, densityScore2, densityScore3]
     # UPDATE (pair) : [ [[clusterlist],densityScore, id = -1], [clusterlist],densityScore1, id = -1]]
-    # clusterProjection (rowId) : [pairId1, pairId2,...]
-    
     for index,cluster in enumerate(k_clusters):
-        #print(cluster)
         densityScore = loyoladf.getDensityScore(cluster)
         densityMap.setdefault(tuple(pair),[]).append([[i for i in cluster.index],densityScore])
 
 # Calculate the full multidimensional cluster
+multi_k_clusters = []
+densityList = []
+finalList = [-1 for i in range(len(geneDf))]
+if rank == 0 :
+    multi_k_clusters = standaloneGenerateClusters(k,geneDf)
+    for index,cluster in enumerate(k_clusters):
+        densityScore = loyoladf.getDensityScore(cluster)
+        densityList.append([[i for i in cluster.index],densityScore])
+    multiList = sorted(densityList,key = lambda x: x[1])
+    for rowId in range(len(geneDf)) :
+        for index, clusterData in enumerate(multiList) :
+            clusterIndices = clusterData[0]
+            if rowId in clusterIndices :
+                finalList[rowId] = index
+                break
+    print(finalList)
 
+    
+#comm.barrier()
 
 for key in densityMap :
     listData = densityMap[key]
     sortedList = sorted(listData, key = lambda x: x[1])
     densityMap[key] = sortedList
-    #print(key,densityMap[key])
+
 
 sortedClusterMap = {} 
 sortedDensityMap = {}
@@ -495,7 +528,7 @@ combineCluster = combineAllGather(sortedClusterMap)
 
 rankingMap = {}
 projectionMap = {}
-
+finalResult = [0 for i in range(len(dataframe))]
 if rank == 0 :
     for rowId in range(len(dataframe)) :
         for pair, clusterListings in combineCluster.items() :
@@ -507,9 +540,25 @@ if rank == 0 :
     for rowId, item in rankingMap.items() :
         #print([i[0],i[2]] for i in item)
         projectionMap.setdefault(rowId,[]).append(getProjectionRow(item))
-        
+    for rowIdKey in projectionMap :
+        winningList  = projectionMap[rowIdKey][0]
+        print(winningList)
+        countArray = [0 for i in range(k)]
+        max = -1
+        winningIndex = []
+        for value in winningList :
+            countArray[value] = countArray[value] + 1
+            if countArray[value] > max :
+                max = countArray[value]
+                winningIndex = [value,max,finalList[rowIdKey]]
+            elif countArray[value] == max :
+                winningIndex.append([value, max,finalList[rowIdKey]])
+        finalResult[rowIdKey] = winningIndex
 
-print(projectionMap)
+
+    
+    print(finalResult)
+    print(getPercentage(finalResult,cols))
 
 
 
